@@ -21,6 +21,7 @@ class ForegroundService : Service() {
         return START_STICKY
     }
 
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun buildNotification(): Notification {

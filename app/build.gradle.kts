@@ -3,8 +3,9 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("com.chaquo.python")
-    kotlin("kapt")
+    id("kotlin-kapt")
     alias(libs.plugins.hilt.plugin)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -15,8 +16,8 @@ android {
         applicationId = "com.python"
         minSdk = 31
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.0.3"
+        versionCode = 5
+        versionName = "1.0.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             abiFilters += listOf("arm64-v8a", )
@@ -89,9 +90,10 @@ dependencies {
     implementation(libs.androidx.hilt.navigation.compose)
     kapt("com.google.dagger:hilt-compiler:2.56.2")
     implementation("com.google.accompanist:accompanist-systemuicontroller:0.36.0")
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    ksp("androidx.room:room-compiler:2.6.1")
 
-//    implementation("com.google.accompanist:accompanist-pager:0.35.0-alpha") // 版本请与 Compose 对齐
-//    implementation("com.google.accompanist:accompanist-pager-indicators:0.35.0-alpha")
     implementation("com.github.bitfireAT:dav4jvm:2.2.1") {
         exclude(group = "org.ogce", module = "xpp3")
         exclude(group = "xmlpull", module = "xmlpull")

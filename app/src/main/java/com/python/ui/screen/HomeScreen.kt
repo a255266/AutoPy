@@ -72,6 +72,20 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import com.google.accompanist.systemuicontroller.rememberSystemUiController
+import android.app.AlarmManager
+import android.app.PendingIntent
+import android.content.Intent
+import android.os.Build
+import java.util.Calendar
+import com.python.service.ForegroundService
+import android.provider.Settings
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.python.data.ScheduledTask
+import com.python.ui.viewmodels.HomeViewModel
+import com.python.ui.viewmodels.SettingsViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+
 
 @Composable
 fun ObserveFabVisible(
@@ -85,7 +99,7 @@ fun ObserveFabVisible(
     var previousScrollOffset by remember { mutableStateOf(0f) }
 
     LaunchedEffect(listState) {
-        snapshotFlow { listState.firstVisibleItemScrollOffset + listState.firstVisibleItemIndex * 1000 }
+        snapshotFlow { listState.firstVisibleItemScrollOffset + listState.firstVisibleItemIndex * 500 }
             .collect { currentOffset ->
                 val delta = currentOffset - previousScrollOffset
                 previousScrollOffset = currentOffset.toFloat()
@@ -104,10 +118,12 @@ fun ObserveFabVisible(
 fun HomeScreen(
     navController: NavHostController = rememberNavController(),
     onSearchClick: () -> Unit = {},
-    onSettingsClick: () -> Unit = {},
-    onLogClick: () -> Unit = {},
+    viewModel: HomeViewModel,
 ) {
+    val homeListState = rememberLazyListState()
+    val timingListState = rememberLazyListState()
 
+    val tasks by viewModel.scheduledTasks.collectAsState()
 
     val context = LocalContext.current
     val tabs = listOf("首页", "定时")
@@ -115,27 +131,24 @@ fun HomeScreen(
     val coroutineScope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
-    var fileList by remember { mutableStateOf<List<File>>(emptyList()) }
-    var runResult by remember { mutableStateOf<String?>(null) }
-    var showResultDialog by remember { mutableStateOf(false) }
+    val fileList by viewModel.fileList.collectAsState()
+
+
     var showDialog by remember { mutableStateOf(false) }
     var filename by remember { mutableStateOf("") }
     var size by remember { mutableStateOf(IntSize.Zero) }
 
-    val baseDir = File(context.filesDir, "python_files")
-
     //滑动隐藏悬浮按钮
     var isFabVisible by remember { mutableStateOf(true) }
-    val listState = rememberLazyListState()
-    ObserveFabVisible(listState = listState) { isFabVisible = it }
+    ObserveFabVisible(listState = homeListState) { isFabVisible = it }
 
 
 
 
     LaunchedEffect(Unit) {
-        if (!baseDir.exists()) baseDir.mkdirs()
-        fileList = baseDir.listFiles()?.filter { it.isFile } ?: emptyList()
+        viewModel.loadFiles(context)
     }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -171,42 +184,23 @@ fun HomeScreen(
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = Color.Transparent,
                         scrolledContainerColor = Color.Transparent,
-//                        navigationIconContentColor = MaterialTheme.colorScheme.primary,
-//                        titleContentColor = MaterialTheme.colorScheme.primary,
-//                        actionIconContentColor = MaterialTheme.colorScheme.primary,
                     ),
                 )
             },
             floatingActionButton = {
-                AddButton(
-                    isExpand = isFabVisible,
-                    onClick = { showDialog = true },
-                    modifier = Modifier
-                        .padding(end = 35.dp, bottom = 75.dp) // 控制边距
-                        .size(66.dp) // 控制按钮尺寸，默认是 56.dp
-                )
-//                AddButton(
-//                    isExpand = isFabVisible,
-//                    onClick = { showDialog = true },
-//                    modifier = Modifier
-//                        .padding(end = 35.dp, bottom = 75.dp) // 控制边距
-//                        .size(66.dp) // 控制按钮尺寸，默认是 56.dp
-//                ) {
-//                    Icon(
-//                        imageVector = Icons.Default.Add,
-//                        contentDescription = "新增",
-//                        modifier = Modifier.size(24.dp) // 控制图标尺寸，默认是 24.dp
-//                    )
-//                }
+                if (pagerState.currentPage == 0 && isFabVisible) {
+                    AddButton(
+                        isExpand = isFabVisible,
+                        onClick = { showDialog = true },
+                        modifier = Modifier
+                            .padding(end = 35.dp, bottom = 75.dp)
+                            .size(66.dp)
+                    )
+                }
             },
         ) { innerPadding  ->
 
-
-            Column(
-//                modifier = Modifier
-//                    .padding(innerPadding)
-//                    .fillMaxSize()
-            ) {
+            Column() {
                     TabRow(
                         selectedTabIndex = pagerState.currentPage,
                         modifier = Modifier
@@ -263,77 +257,26 @@ fun HomeScreen(
                         .weight(1f) // 关键：避免撑满高度，防止nestedScroll计算负值
                 ) { page ->
                     when (page) {
-//                        0 -> HomeContent(
-//                            modifier = Modifier
-//                                .padding(innerPadding),
-//                            fileList = fileList,
-//                            onRunClick = { file ->
-//                                runResult = PythonRunner.runFileWithRunpy(context, file)
-//                                showResultDialog = true
-//                            },
-//                            onItemClick = { file ->
-//                                navController.navigate("editor/${file.nameWithoutExtension}")
-//                            },
-//                            onItemLongClick = { file ->
-//                                // 删除文件并刷新列表
-//                                // 删除文件后刷新 fileList
-//                                if (file.exists()) file.delete()
-//                                val files = baseDir.listFiles()?.filter { it.isFile } ?: emptyList()
-//                                fileList = files
-//                            },
-//                            runResult = runResult,
-//                            showResultDialog = showResultDialog,
-//                            onDismissDialog = { showResultDialog = false }
-//                        )
-//                        0 ->    LazyColumn(
-//                            modifier = Modifier
-//                                .padding(innerPadding)
-//                                .nestedScroll(scrollBehavior.nestedScrollConnection)
-//                                .fillMaxSize(),
-//                            contentPadding = PaddingValues(16.dp),
-//                            verticalArrangement = Arrangement.spacedBy(8.dp)
-//                        ) {
-//                            items(30) { index ->
-//                                Card(
-//                                    modifier = Modifier.fillMaxWidth(),
-//                                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-//                                ) {
-//                                    Text(
-//                                        "Item #$index",
-//                                        modifier = Modifier.padding(16.dp),
-//                                        style = MaterialTheme.typography.bodyLarge
-//                                    )
-//                                }
-//                            }
-//                        }
-
-
-                        0 -> HomeContent(
-                            listState = listState,
-                            modifier = Modifier
-//                                .padding(innerPadding)
-                            ,
+                        0 ->
+                            HomeContent(
+                            listState = homeListState,
                             fileList = fileList,
-                            onRunClick = { file ->
-                                runResult = PythonRunner.runFileWithRunpy(context, file)
-                                showResultDialog = true
-                            },
                             onItemClick = { file ->
                                 navController.navigate("editor/${file.nameWithoutExtension}")
                             },
                             onItemLongClick = { file ->
-                                // 删除文件并刷新列表
                                 // 删除文件后刷新 fileList
                                 if (file.exists()) file.delete()
-                                val files = baseDir.listFiles()?.filter { it.isFile } ?: emptyList()
-                                fileList = files
+                                viewModel.deleteFile(file, context)
                             },
-                            runResult = runResult,
-                            showResultDialog = showResultDialog,
-                            onDismissDialog = { showResultDialog = false }
                         )
-//
-                        1 -> TimingContent() // 你的定时页面
+
+                        1 -> TimingContent(
+                            listState = timingListState,
+                            taskList = tasks,
+                            onItemClick = { /* 可跳转编辑 */ },
+                            onItemLongClick = { viewModel.deleteTask(it) }
+                        )
                     }
                 }
 
@@ -355,16 +298,11 @@ fun HomeScreen(
                     confirmButton = {
                         TextButton(onClick = {
                             if (filename.isNotBlank()) {
-                                val newFileName = filename
-                                createPyFile(context, newFileName)
-                                filename = ""  // 清空输入框
+                                val newFileName = filename  // 缓存
+                                viewModel.createFile(context, newFileName)
+                                filename = ""               // 再清空
                                 showDialog = false
-                                // 刷新文件列表
-                                val dir = File(context.filesDir, "python_files")
-                                val files = dir.listFiles()?.filter { it.isFile }?.toList() ?: emptyList()
-                                fileList = files
-
-                                navController.navigate("editor/$newFileName")  // 传入保存的变量
+                                navController.navigate("editor/$newFileName")  // 使用缓存值
                             }
                         }) {
                             Text("确定")
@@ -381,29 +319,17 @@ fun HomeScreen(
     }
 }
 
-fun createPyFile(context: Context, filename: String) {
-    val codeDir = File(context.filesDir, "python_files")
-    if (!codeDir.exists()) {
-        codeDir.mkdirs()
-    }
-    val file = File(codeDir, "$filename.py")
-    if (!file.exists()) {
-        file.writeText("")  // 创建空文件
-    }
-}
 
+//TODO首页
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun HomeContent(
-    modifier: Modifier = Modifier,
+//    modifier: Modifier = Modifier,
     listState: LazyListState,
     fileList: List<File>,
-    onRunClick: (File) -> Unit,
     onItemClick: (File) -> Unit,
     onItemLongClick: (File) -> Unit,
-    runResult: String?,
-    showResultDialog: Boolean,
-    onDismissDialog: () -> Unit
+    viewModel: HomeViewModel = hiltViewModel(),
 ) {
 
 
@@ -411,7 +337,6 @@ fun HomeContent(
 
     val coroutineScope = rememberCoroutineScope() // 创建协程作用域
 
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val runningMap = remember { mutableStateMapOf<String, Boolean>() }
     // 管理每个文件的显示状态，初始都为 true
     val visibleMap = remember { mutableStateMapOf<String, Boolean>() }
@@ -428,14 +353,47 @@ fun HomeContent(
 
     LazyColumn(
         state = listState,
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 10.dp, bottom = 30.dp)
     ) {
         items(fileList, key = { it.absolutePath }) { file ->
+
+
             var showConfirm by remember { mutableStateOf(false) }
             val isRunning = runningMap[file.absolutePath] ?: false
+            var showTimePicker by remember { mutableStateOf(false) }
+
+            if (showTimePicker) {
+                TimePickerDialogMaterial3(
+                    onDismiss = { showTimePicker = false },
+                    onConfirm = { hour, minute, repeat ->
+                        schedulePythonExecution(context, file, hour, minute, repeat)
+                    }
+                )
+            }
+            if (showTimePicker) {
+                TimePickerDialogMaterial3(
+                    onDismiss = { showTimePicker = false },
+                    onConfirm = { hour, minute, repeatDaily ->
+                        showTimePicker = false
+
+                        // 保存到数据库
+                        val task = ScheduledTask(
+                            filePath = file.absolutePath,
+                            hour = hour,
+                            minute = minute,
+                            repeatDaily = repeatDaily
+                        )
+                        viewModel.insertTask(task)
+
+                        // 安排 AlarmManager 定时任务
+                        schedulePythonExecution(context, file, hour, minute, repeatDaily)
+                    }
+                )
+            }
+
 
             val rotation by animateFloatAsState(
                 targetValue = if (isRunning) 360f else 0f,
@@ -444,7 +402,7 @@ fun HomeContent(
 
             val interactionSource = remember { MutableInteractionSource() }
             val isPressed by interactionSource.collectIsPressedAsState()
-            val scale by animateFloatAsState(targetValue = if (isPressed) 0.96f else 1f)
+            val scale by animateFloatAsState(targetValue = if (isPressed) 0.95f else 1.0f)
 
             val visible = visibleMap[file.absolutePath] ?: true
 
@@ -460,7 +418,7 @@ fun HomeContent(
                             showConfirm = false
                             // 延迟动画时长后执行删除操作
                             coroutineScope.launch {
-                                kotlinx.coroutines.delay(1000) // 动画时长
+                                delay(1000) // 动画时长
                                 onItemLongClick(file)
                             }
                         }) {
@@ -483,13 +441,6 @@ fun HomeContent(
                 Column {
                     Card(
                         modifier = Modifier
-                            .layout { measurable, constraints ->
-                                Log.d("LayoutDebug", "Measured with: $constraints")
-                                val placeable = measurable.measure(constraints)
-                                layout(placeable.width, placeable.height) {
-                                    placeable.place(0, 0)
-                                }
-                            }
                             .fillMaxWidth()
                             .wrapContentHeight()
                             .graphicsLayer(scaleX = scale, scaleY = scale)
@@ -505,11 +456,12 @@ fun HomeContent(
 //                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     ) {
-                        Column(modifier = Modifier.padding(start = 12.dp,end = 8.dp,  top = 6.dp, bottom = 6.dp)) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 12.dp,end = 8.dp,  top = 6.dp, bottom = 6.dp)
                             ) {
                                 Text(
                                     text = file.name,
@@ -548,7 +500,18 @@ fun HomeContent(
                                             .graphicsLayer(rotationZ = rotation)
                                     )
                                 }
-                                IconButton(onClick = {  }) {
+                                IconButton(onClick = {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                                        if (!alarmManager.canScheduleExactAlarms()) {
+                                            val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                                            context.startActivity(intent)
+                                            return@IconButton
+                                        }
+                                    }
+
+                                    showTimePicker  = true }
+                                ) {
                                     Icon(
                                         painter = painterResource(id = R.drawable.timing1),
                                         contentDescription = "定时",
@@ -557,15 +520,141 @@ fun HomeContent(
                                     )
                                 }
                             }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+            }
+        }
+    }
+}
+
+
+
+//TODO定时页面
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun TimingContent(
+//    modifier: Modifier = Modifier,
+    listState: LazyListState,
+    taskList: List<ScheduledTask>,
+    onItemClick: (ScheduledTask) -> Unit,
+    onItemLongClick: (ScheduledTask) -> Unit,
+) {
+
+
+
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope() // 创建协程作用域
+    val visibleMap = remember { mutableStateMapOf<Int, Boolean>() }
+
+    taskList.forEach { task ->
+        visibleMap.putIfAbsent(task.id, true)
+    }
+
+    fun cancelScheduledTask(context: Context, task: ScheduledTask) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+        val intent = Intent(context, ForegroundService::class.java).apply {
+            putExtra("filePath", task.filePath)
+        }
+
+        val pendingIntent = PendingIntent.getForegroundService(
+            context,
+            task.id, // 必须与 schedule 中用的 requestCode 相同
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        alarmManager.cancel(pendingIntent)
+    }
+
+
+
+    LazyColumn(
+        state = listState,
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 30.dp)
+    ) {
+        items(taskList, key = { it.id }) { task ->
+
+            var showConfirm by remember { mutableStateOf(false) }
+            val visible = visibleMap[task.id] ?: true
+            if (showConfirm) {
+                AlertDialog(
+                    onDismissRequest = { showConfirm = false },
+                    title = { Text("删除定时任务") },
+                    text = { Text("确定删除 ${File(task.filePath).name} 的任务吗？") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            visibleMap[task.id] = false
+                            showConfirm = false
+                            coroutineScope.launch {
+                                delay(500)
+                                cancelScheduledTask(context, task)
+                                onItemLongClick(task)
+                            }
+                        }) { Text("删除") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showConfirm = false }) { Text("取消") }
+                    }
+                )
+            }
+
+            AnimatedVisibility(
+                visible = visible,
+                exit = fadeOut(tween(500)) + scaleOut(tween(500), targetScale = 1.5f),
+                modifier = Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)
+            ) {
+                Column {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .wrapContentHeight()
+                            .clip(RoundedCornerShape(10.dp)) // 裁剪内容以适配圆角
+                            .animateContentSize()
+                            .combinedClickable(
+                                onClick = { onItemClick(task) },
+                                onLongClick = { showConfirm = true }
+                            ),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(
+                                    start = 12.dp,
+                                    end = 12.dp,
+                                    top = 17.dp,
+                                    bottom = 17.dp
+                                )
+                        ) {
+                            Text(
+                                text = File(task.filePath).name,
+                                style = MaterialTheme.typography.titleMedium.copy(fontSize = 20.sp),
+                            )
+                            Text(
+                                text = "定时：${
+                                    task.hour.toString().padStart(2, '0')
+                                }:${
+                                    task.minute.toString().padStart(2, '0')
+                                } ${if (task.repeatDaily) "每日执行" else "执行一次"}",
+//                                color = Color.Unspecified,
+                                style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp),
+                            )
                         }
                     }
                     Spacer(modifier = Modifier.height(10.dp))
                 }
             }
-            }
         }
     }
-//}
+}
 
 @Composable
 fun AddButton(isExpand: Boolean, modifier: Modifier = Modifier,onClick: () -> Unit) {
@@ -592,32 +681,99 @@ fun AddButton(isExpand: Boolean, modifier: Modifier = Modifier,onClick: () -> Un
     }
 }
 
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TimePickerDialogMaterial3(
+    onDismiss: () -> Unit,
+    onConfirm: (hour: Int, minute: Int, repeatDaily: Boolean) -> Unit
+) {
+    val timePickerState = rememberTimePickerState(initialHour = 9, initialMinute = 0)
+    var repeatDaily by remember { mutableStateOf(true) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("设置定时任务") },
+        text = {
+            Column {
+                TimePicker(state = timePickerState)
+                Spacer(Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = repeatDaily, onCheckedChange = { repeatDaily = it })
+                    Spacer(Modifier.width(8.dp))
+                    Text("每日重复")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onConfirm(timePickerState.hour, timePickerState.minute, repeatDaily)
+                onDismiss()
+            }) {
+                Text("确定")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
+}
+
+
+
+fun schedulePythonExecution(context: Context, file: File, hour: Int, minute: Int, repeatDaily: Boolean) {
+    val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+    val intent = Intent(context, ForegroundService::class.java).apply {
+        putExtra("filePath", file.absolutePath)
+    }
+
+    val pendingIntent = PendingIntent.getForegroundService(
+        context, file.hashCode(), intent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    val calendar = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, hour)
+        set(Calendar.MINUTE, minute)
+        set(Calendar.SECOND, 0)
+        if (before(Calendar.getInstance())) add(Calendar.DAY_OF_MONTH, 1)
+    }
+
+    if (repeatDaily) {
+        alarmManager.setRepeating(
+            AlarmManager.RTC_WAKEUP,
+            calendar.timeInMillis,
+            AlarmManager.INTERVAL_DAY,
+            pendingIntent
+        )
+    } else {
+        alarmManager.setExactAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            calendar.timeInMillis,
+            pendingIntent
+        )
+    }
+}
+
+
+
+
+
+//@Preview(name = "Light Theme", showBackground = true)
 //@Composable
-//fun HomeContent() {
-//    // 首页内容，比如列表
-//    Text("这里是首页内容")
+//fun HomeScreenLightPreview() {
+//    AutoPyTheme(darkTheme = false) {
+//        HomeScreen()
+//    }
 //}
-
-//定时页面
-@Composable
-fun TimingContent() {
-    Text("这里是定时内容")
-}
-
-
-
-@Preview(name = "Light Theme", showBackground = true)
-@Composable
-fun HomeScreenLightPreview() {
-    AutoPyTheme(darkTheme = false) {
-        HomeScreen()
-    }
-}
-
-@Preview(name = "Dark Theme", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-fun HomeScreenDarkPreview() {
-    AutoPyTheme(darkTheme = true) {
-        HomeScreen()
-    }
-}
+//
+//@Preview(name = "Dark Theme", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+//@Composable
+//fun HomeScreenDarkPreview() {
+//    AutoPyTheme(darkTheme = true) {
+//        HomeScreen()
+//    }
+//}
