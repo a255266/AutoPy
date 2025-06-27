@@ -338,7 +338,6 @@ fun HomeContent(
     val coroutineScope = rememberCoroutineScope() // 创建协程作用域
 
     val runningMap = remember { mutableStateMapOf<String, Boolean>() }
-    // 管理每个文件的显示状态，初始都为 true
     val visibleMap = remember { mutableStateMapOf<String, Boolean>() }
 
 
@@ -368,14 +367,6 @@ fun HomeContent(
             if (showTimePicker) {
                 TimePickerDialogMaterial3(
                     onDismiss = { showTimePicker = false },
-                    onConfirm = { hour, minute, repeat ->
-                        schedulePythonExecution(context, file, hour, minute, repeat)
-                    }
-                )
-            }
-            if (showTimePicker) {
-                TimePickerDialogMaterial3(
-                    onDismiss = { showTimePicker = false },
                     onConfirm = { hour, minute, repeatDaily ->
                         showTimePicker = false
 
@@ -387,12 +378,10 @@ fun HomeContent(
                             repeatDaily = repeatDaily
                         )
                         viewModel.insertTask(task)
-
-                        // 安排 AlarmManager 定时任务
-                        schedulePythonExecution(context, file, hour, minute, repeatDaily)
                     }
                 )
             }
+
 
 
             val rotation by animateFloatAsState(

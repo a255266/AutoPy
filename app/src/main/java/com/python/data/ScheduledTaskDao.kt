@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ScheduledTaskDao {
+
     @Query("SELECT * FROM scheduled_tasks")
     fun getAllFlow(): Flow<List<ScheduledTask>>
 
