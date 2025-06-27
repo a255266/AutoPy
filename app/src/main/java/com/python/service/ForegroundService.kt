@@ -61,8 +61,14 @@ class ForegroundService : Service() {
 
                     if (task.repeatDaily) {
                         scheduler.scheduleDaily(taskId, task.hour, task.minute) {
-                            Log.d("ForegroundService", "正在执行任务 id=$taskId 路径=${task.filePath}")
+                            Log.d("ForegroundService", "执行重复任务 id=$taskId 路径=${task.filePath}")
                             runPython(task.filePath)
+                        }
+                    } else {
+                        scheduler.scheduleOnce(taskId, task.hour, task.minute) {
+                            Log.d("ForegroundService", "执行一次性任务 id=$taskId 路径=${task.filePath}")
+                            runPython(task.filePath)
+                            dao.deleteById(task.id)
                         }
                     }
                 }

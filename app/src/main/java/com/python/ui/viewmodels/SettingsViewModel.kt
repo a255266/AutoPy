@@ -3,6 +3,7 @@ package com.python.ui.viewmodels
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
@@ -51,7 +52,13 @@ class SettingsViewModel @Inject constructor(
         _notificationEnabled.value = NotificationManagerCompat.from(context).areNotificationsEnabled()
     }
 
+    private val _batteryOptimizedAllowed = MutableStateFlow(false)
+    val batteryOptimizedAllowed: StateFlow<Boolean> = _batteryOptimizedAllowed
 
+    fun refreshBatteryOptimization(context: Context) {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        _batteryOptimizedAllowed.value = pm.isIgnoringBatteryOptimizations(context.packageName)
+    }
 
     fun updateString(key: Preferences.Key<String>, value: String) {
         viewModelScope.launch {

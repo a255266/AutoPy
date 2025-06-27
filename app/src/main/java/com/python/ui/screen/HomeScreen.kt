@@ -140,8 +140,15 @@ fun HomeScreen(
 
     //滑动隐藏悬浮按钮
     var isFabVisible by remember { mutableStateOf(true) }
-    ObserveFabVisible(listState = homeListState) { isFabVisible = it }
+    ObserveFabVisible(listState = homeListState) { visible ->
+        Log.d("AddButton", "FAB 可见性变化: $visible")
+        isFabVisible = visible
+    }
 
+    // 更新任务函数，直接调用 ViewModel 的更新
+    fun updateTask(task: ScheduledTask) {
+        viewModel.updateTask(task)
+    }
 
 
 
@@ -171,9 +178,9 @@ fun HomeScreen(
                         )
                             },
                     actions = {
-                        IconButton(onClick = onSearchClick) {
-                            Icon(Icons.Default.Search, contentDescription = "搜索")
-                        }
+//                        IconButton(onClick = onSearchClick) {
+//                            Icon(Icons.Default.Search, contentDescription = "搜索")
+//                        }
                         IconButton(onClick = { navController.navigate("log") }) {
                             Icon(Icons.Default.DateRange, contentDescription = "日志")
                         }
@@ -188,7 +195,7 @@ fun HomeScreen(
                 )
             },
             floatingActionButton = {
-                if (pagerState.currentPage == 0 && isFabVisible) {
+                if (pagerState.currentPage == 0) {
                     AddButton(
                         isExpand = isFabVisible,
                         onClick = { showDialog = true },
@@ -274,7 +281,7 @@ fun HomeScreen(
                         1 -> TimingContent(
                             listState = timingListState,
                             taskList = tasks,
-                            onItemClick = { /* 可跳转编辑 */ },
+                            onUpdateTask = { updatedTask -> updateTask(updatedTask) },
                             onItemLongClick = { viewModel.deleteTask(it) }
                         )
                     }
@@ -332,18 +339,18 @@ fun HomeContent(
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
 
-
     val context = LocalContext.current
-
-    val coroutineScope = rememberCoroutineScope() // 创建协程作用域
+    val coroutineScope = rememberCoroutineScope()
 
     val runningMap = remember { mutableStateMapOf<String, Boolean>() }
     val visibleMap = remember { mutableStateMapOf<String, Boolean>() }
 
+    // 按文件最后修改时间倒序排序
+    val sortedFileList = remember(fileList) {
+        fileList.sortedByDescending { it.lastModified() }
+    }
 
-
-
-    fileList.forEach { file ->
+    sortedFileList.forEach { file ->
         val path = file.absolutePath
         runningMap.putIfAbsent(path, false)
         visibleMap.putIfAbsent(path, true)
@@ -357,7 +364,7 @@ fun HomeContent(
             .padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 10.dp, bottom = 30.dp)
     ) {
-        items(fileList, key = { it.absolutePath }) { file ->
+        items(sortedFileList, key = { it.absolutePath }) { file ->
 
 
             var showConfirm by remember { mutableStateOf(false) }
@@ -526,7 +533,7 @@ fun TimingContent(
 //    modifier: Modifier = Modifier,
     listState: LazyListState,
     taskList: List<ScheduledTask>,
-    onItemClick: (ScheduledTask) -> Unit,
+    onUpdateTask: (ScheduledTask) -> Unit,
     onItemLongClick: (ScheduledTask) -> Unit,
 ) {
 
@@ -535,7 +542,8 @@ fun TimingContent(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope() // 创建协程作用域
     val visibleMap = remember { mutableStateMapOf<Int, Boolean>() }
-
+    var showTimePicker by remember { mutableStateOf(false) }
+    var editingTask by remember { mutableStateOf<ScheduledTask?>(null) }
     taskList.forEach { task ->
         visibleMap.putIfAbsent(task.id, true)
     }
@@ -555,6 +563,18 @@ fun TimingContent(
         )
 
         alarmManager.cancel(pendingIntent)
+    }
+
+
+    if (showTimePicker && editingTask != null) {
+        TimePickerDialogMaterial3(
+            onDismiss = { showTimePicker = false },
+            onConfirm = { hour, minute, repeatDaily ->
+                showTimePicker = false
+                val updated = editingTask!!.copy(hour = hour, minute = minute, repeatDaily = repeatDaily)
+                onUpdateTask(updated)  // 调用更新数据库的方法
+            }
+        )
     }
 
 
@@ -605,7 +625,10 @@ fun TimingContent(
                             .clip(RoundedCornerShape(10.dp)) // 裁剪内容以适配圆角
                             .animateContentSize()
                             .combinedClickable(
-                                onClick = { onItemClick(task) },
+                                onClick = {
+                                    editingTask = task
+                                    showTimePicker = true
+                                },
                                 onLongClick = { showConfirm = true }
                             ),
                         shape = RoundedCornerShape(10.dp),
@@ -633,7 +656,6 @@ fun TimingContent(
                                 }:${
                                     task.minute.toString().padStart(2, '0')
                                 } ${if (task.repeatDaily) "每日执行" else "执行一次"}",
-//                                color = Color.Unspecified,
                                 style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp),
                             )
                         }
@@ -647,14 +669,13 @@ fun TimingContent(
 
 @Composable
 fun AddButton(isExpand: Boolean, modifier: Modifier = Modifier,onClick: () -> Unit) {
+    Log.d("AddButton", "isExpand = $isExpand")
     Box(modifier = Modifier.fillMaxSize()) {
         AnimatedVisibility(
             visible = isExpand,
             modifier = Modifier.align(Alignment.BottomEnd),
             enter = fadeIn(animationSpec = tween(durationMillis = 500)),
             exit = fadeOut(animationSpec = tween(durationMillis = 500))
-//            enter = scaleIn(initialScale = 0.1f),
-//            exit = scaleOut(targetScale = 0.1f)
         ) {
             FloatingActionButton(
                 onClick = onClick,

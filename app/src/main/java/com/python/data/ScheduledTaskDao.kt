@@ -17,4 +17,7 @@ interface ScheduledTaskDao {
 
     @Query("DELETE FROM scheduled_tasks WHERE filePath = :path")
     suspend fun deleteByPath(path: String)
+
+    @Query("DELETE FROM scheduled_tasks WHERE id = :id")
+    suspend fun deleteById(id: Int)
 }

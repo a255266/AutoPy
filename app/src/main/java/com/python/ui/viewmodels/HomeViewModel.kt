@@ -17,6 +17,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Singleton
 import androidx.lifecycle.viewModelScope
 import com.python.data.ScheduledTask
+import com.python.data.ScheduledTaskDao
 import com.python.data.ScheduledTaskRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,7 +27,8 @@ import kotlinx.coroutines.launch
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val repository: ScheduledTaskRepository
+    private val repository: ScheduledTaskRepository,
+    private val dao: ScheduledTaskDao
 ) : ViewModel() {
 
 
@@ -77,10 +79,10 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    // 根据路径删除任务
-    fun deleteByPath(path: String) {
-        viewModelScope.launch {
-            repository.deleteByPath(path)
-        }
+
+
+    fun updateTask(task: ScheduledTask) = viewModelScope.launch {
+        dao.insert(task)  // Room 的 insert(onConflict=REPLACE) 也可以更新
     }
+
 }

@@ -2,6 +2,7 @@ package com.python.ui.screen
 
 import android.content.Intent
 import android.net.Uri
+import android.os.PowerManager
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -35,6 +36,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.flowWithLifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+//import android.content.Context
 
 //设置页面
 @OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
@@ -45,8 +47,10 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
 
+    // 刷新通知权限状态
     LaunchedEffect(Unit) {
         viewModel.refreshNotificationPermission(context)
+        viewModel.refreshBatteryOptimization(context)
     }
 
 
@@ -56,8 +60,16 @@ fun SettingsScreen(
         viewModel.refreshNotificationPermission(context)
     }
 
+    // 电池优化权限设置启动器
+    val settingsLauncherBattery = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        viewModel.refreshBatteryOptimization(context)
+    }
 
     val notificationEnabled by viewModel.notificationEnabled.collectAsState()
+    val batteryOptState by viewModel.batteryOptimizedAllowed.collectAsState()
+
 
 
     val settings by viewModel.webDavSettings.collectAsState(
@@ -72,6 +84,7 @@ fun SettingsScreen(
     var decryptKey by remember { mutableStateOf(settings.decryptKey) }
     var foregroundServiceEnabled by remember { mutableStateOf(settings.foregroundServiceEnabled) }
     var allowSystemSettings by remember { mutableStateOf(settings.allowSystemSettings) }
+
 
     // 外部数据变化时，同步更新 Compose 状态，避免UI与数据不同步
     LaunchedEffect(settings) {
@@ -192,35 +205,59 @@ fun SettingsScreen(
                         checked = notificationEnabled,
                         onCheckedChange = {
                             val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                }
-                                settingsLauncher.launch(intent)
+                                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                            }
+                            settingsLauncher.launch(intent)
                         }
                     )
                 }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 7.dp)
-                    .padding(horizontal = 14.dp), // 左右各 16.dp 边距
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "修改系统设置",
-                    fontSize = 20.sp ,
-                    modifier = Modifier.weight(1f),
-                    color = MaterialTheme.colorScheme.onSurface
+                //
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 7.dp)
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "电池优化权限",
+                        fontSize = 20.sp,
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Switch(
+                        checked = batteryOptState,
+                        onCheckedChange = {
+                            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                            settingsLauncherBattery.launch(intent)
+                        }
+                    )
+                }
 
-                )
-                Switch(
-                    checked = allowSystemSettings,
-                    onCheckedChange = {
-                        allowSystemSettings = it
-                        viewModel.updateBoolean(WebDavKeys.ALLOW_SYSTEM_SETTINGS, it)
-                    }
-                )
-            }
+                //修改系统设置
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 7.dp)
+                        .padding(horizontal = 14.dp), // 左右各 16.dp 边距
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "修改系统设置",
+                        fontSize = 20.sp ,
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.onSurface
+
+                    )
+                    Switch(
+                        checked = allowSystemSettings,
+                        onCheckedChange = {
+                            allowSystemSettings = it
+                            viewModel.updateBoolean(WebDavKeys.ALLOW_SYSTEM_SETTINGS, it)
+                        }
+                    )
+                }
 
 //                SectionTitle("参数")
 //
