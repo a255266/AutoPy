@@ -12,3 +12,11 @@ data class ScheduledTask(
     val minute: Int,
     val repeatDaily: Boolean
 )
+
+@Entity(tableName = "file_sync")
+data class FileSyncEntry(
+    @PrimaryKey val fileName: String,
+    val fullNameWithTimestamp: String,
+    val timestamp: Long,
+)
+

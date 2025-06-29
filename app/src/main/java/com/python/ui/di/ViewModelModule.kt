@@ -1,9 +1,13 @@
 package com.python.ui.di
 
 import android.content.Context
+import android.util.Log
+import androidx.room.Room
+import com.python.data.AppDatabase
 import com.python.data.ScheduledTaskDao
 import com.python.data.ScheduledTaskDatabase
 import com.python.data.ScheduledTaskRepository
+import com.python.data.SyncFileDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -31,3 +35,21 @@ object HomeViewModule {
         return ScheduledTaskRepository(dao)
     }
 }
+
+@Module
+@InstallIn(SingletonComponent::class)
+object DatabaseModule {
+
+    @Provides
+    @Singleton
+    fun provideDatabase(@ApplicationContext context: Context): AppDatabase {
+        Log.d("DatabaseModule", "provideDatabase called")
+        return AppDatabase.getInstance(context)
+    }
+
+
+    @Provides
+    fun provideSyncFileDao(db: AppDatabase): SyncFileDao = db.syncFileDao()
+}
+
+

@@ -83,7 +83,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.python.R
+import com.python.data.FileSyncEntry
+import com.python.data.WebDavManager
+import com.python.ui.viewmodels.CloudSyncViewModel
+import com.python.ui.viewmodels.HomeViewModel
 import com.python.util.throttleClick
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -99,9 +104,8 @@ import java.io.File
 fun EditorScreen(
     navController: NavHostController,
     filename: String,
-    onSearchClick: () -> Unit = {},
     onSettingsClick: () -> Unit = {},
-    onLogClick: () -> Unit = {},
+    viewModel:CloudSyncViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
 
@@ -121,18 +125,30 @@ fun EditorScreen(
         }
     }
 
+
+//    val syncEntries by viewModel.syncEntriesFlow.collectAsState(emptyList())
+
+
     // 节流保存逻辑，避免频繁写入磁盘
     LaunchedEffect(codeText.text) {
         snapshotFlow { codeText.text }
-            .debounce(1000)
+            .debounce(500)
             .collectLatest { text ->
                 try {
-                    file.writeText(text)
+                    val oldContent = file.takeIf { it.exists() }?.readText()
+                    if (oldContent != text) {
+                        file.writeText(text)
+                        Log.d("EditorScreen", "✅ 本地写入完成，开始上传")
+                        viewModel.uploadAndReplaceFile(file)
+                    }
                 } catch (e: Exception) {
-                    Log.e("EditorScreen", "写入文件失败", e)
+                    Log.e("EditorScreen", "保存或上传失败", e)
                 }
             }
     }
+
+
+
 
     val coroutineScope = rememberCoroutineScope() // 创建协程作用域
     var isRunning by remember { mutableStateOf(false) }

@@ -17,13 +17,14 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.preferencesDataStore
 import at.bitfire.dav4jvm.ResponseCallback
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import java.io.IOException
-
+import java.net.URLDecoder
 
 
 @Singleton
@@ -44,7 +45,7 @@ class WebDavManager @Inject constructor(
     private suspend fun createResource(remotePath: String): DavResource {
         val settings = loadSettings()
         require(settings.server.isNotEmpty() && settings.account.isNotEmpty() && settings.password.isNotEmpty()) {
-            "WebDav settings are incomplete"
+            "WebDAV settings are incomplete"
         }
         val okHttpClient = OkHttpClient.Builder()
             .followRedirects(false)
@@ -57,7 +58,6 @@ class WebDavManager @Inject constructor(
             .build()
         val cleanPath = remotePath.trimStart('/')
         val fullUrl = "${settings.server.trimEnd('/')}/$cleanPath"
-//        Log.d("WebDAV", "fullUrl: $fullUrl")
 
         try {
             val url = fullUrl.toHttpUrl()
@@ -68,14 +68,11 @@ class WebDavManager @Inject constructor(
         }
     }
 
-
     private suspend fun ensureDirectoryExists(remotePath: String) {
         val resource = createResource(remotePath)
-
         suspendCancellableCoroutine<Unit> { cont ->
             resource.mkCol(null) { response ->
                 if (response.isSuccessful || response.code == 405) {
-                    // 405 = Method Not Allowed，表示目录已存在
                     cont.resume(Unit)
                 } else {
                     cont.resumeWithException(IOException("创建目录失败: HTTP ${response.code}"))
@@ -83,7 +80,6 @@ class WebDavManager @Inject constructor(
             }
         }
     }
-
 
     suspend fun upload(remotePath: String, file: File): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -114,19 +110,15 @@ class WebDavManager @Inject constructor(
                     }
                 )
             }
-
         } catch (e: Exception) {
-            e.printStackTrace()
-            Log.e("WebDAV", "Upload error", e)  // 这里打印详细异常
+            Log.e("WebDAV", "Upload error", e)
             false
         }
     }
 
-
     suspend fun download(remotePath: String, localFile: File): Boolean = withContext(Dispatchers.IO) {
         try {
             val resource = createResource(remotePath)
-
             val data = suspendCancellableCoroutine<ByteArray> { cont ->
                 resource.get("application/octet-stream", null) { response ->
                     try {
@@ -137,11 +129,10 @@ class WebDavManager @Inject constructor(
                     }
                 }
             }
-
             localFile.writeBytes(data)
             true
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("WebDAV", "Download error", e)
             false
         }
     }
@@ -149,8 +140,7 @@ class WebDavManager @Inject constructor(
     suspend fun delete(remotePath: String): Boolean = withContext(Dispatchers.IO) {
         try {
             val resource = createResource(remotePath)
-
-            suspendCancellableCoroutine { cont ->
+            return@withContext suspendCancellableCoroutine { cont ->
                 resource.delete { response ->
                     if (response.isSuccessful) {
                         cont.resume(true)
@@ -159,48 +149,107 @@ class WebDavManager @Inject constructor(
                     }
                 }
             }
-
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("WebDAV", "Delete error", e)
             false
         }
     }
 
 
-    suspend fun getLatestBackupFileByName(): Pair<String, Long>? = withContext(Dispatchers.IO) {
-//        Log.d("AutoSync", "调用 performSyncIfNeeded")
+    suspend fun listCloudPythonFiles(dir: String = "python_files/"): List<String> = withContext(Dispatchers.IO) {
         try {
-            val backupResource = createResource("backup/")
+            val resource = createResource(dir)
+            val result = mutableListOf<String>()
 
-            suspendCancellableCoroutine<Pair<String, Long>?> { cont ->
-                val resultList = mutableListOf<Pair<String, Long>>()
-                Log.d("WebDAV", "开始执行 PROPFIND 请求")
-                backupResource.propfind(1) { response , hrefRelation ->
+            val lock = CompletableDeferred<Unit>()  // 用来等 propfind 完成
+
+            resource.propfind(1) { response, _ ->
+                try {
                     val href = response.href ?: return@propfind
                     val name = href.toString().substringAfterLast("/")
-                    Log.d("WebDAV", "发现文件: $name")
-                    if (name.startsWith("backup_") && name.endsWith(".json")) {
-                        val timestampStr = name.removePrefix("backup_").removeSuffix(".json")
-                        val timestamp = timestampStr.toLongOrNull()
-                        Log.d("WebDAV", "尝试解析时间戳: $timestampStr -> $timestamp")
-                        if (timestamp != null) {
-                            resultList += name to timestamp
-                            Log.d("WebDAV", "匹配到备份文件: $name -> $timestamp")
-                        }
+                    if (name.endsWith(".py")) {
+                        val decodedName = URLDecoder.decode(name, "UTF-8")
+                        result += decodedName
                     }
+                } catch (e: Exception) {
+                    Log.e("WebDAV", "解析 response 失败", e)
+                } finally {
+                    lock.complete(Unit)
                 }
-
-                cont.resume(resultList.maxByOrNull { it.second })
             }
+
+            lock.await()
+            Log.d("WebDAV", "✅ 成功列出云端文件: $result")
+            result
         } catch (e: Exception) {
-            Log.e("WebDAV", "获取最新备份失败", e)
-            null
+            Log.e("WebDAV", "❌ 列出云端文件失败", e)
+            emptyList()
         }
     }
 
 
 
+    suspend fun incrementalSync(
+        context: Context,
+        dao: SyncFileDao,
+        onFilesDownloaded: () -> Unit = {}
+    ){
+        Log.d("WebDAV", "🔄 开始增量同步")
+
+        val cloudList = listCloudPythonFiles()
+        Log.d("WebDAV", "☁️ 云端文件列表: $cloudList")
+
+        val localEntries = dao.getAll()
+        val localFullNames = localEntries.map { it.fullNameWithTimestamp }
+        Log.d("WebDAV", "💾 本地数据库记录: $localFullNames")
+
+        val localDir = File(context.filesDir, "python_files")
+        if (!localDir.exists()) {
+            localDir.mkdirs()
+            Log.d("WebDAV", "📁 创建本地目录: ${localDir.absolutePath}")
+        }
+
+        val toDownload = cloudList.filterNot { it in localFullNames }
+        Log.d("WebDAV", "⬇️ 需要下载的文件: $toDownload")
+
+        toDownload.forEach { fullName ->
+            val localName = fullName.substringBeforeLast("_") + ".py"
+            val localFile = File(localDir, localName)
+            val remotePath = "python_files/$fullName"
+            val success = download(remotePath, localFile)
+            if (success) {
+                val timestamp = extractTimestamp(fullName)
+                dao.insert(FileSyncEntry(localName, fullName, timestamp))
+                Log.d("WebDAV", "✅ 下载并记录: $fullName -> ${localFile.name}")
+            } else {
+                Log.e("WebDAV", "❌ 下载失败: $remotePath")
+            }
+        }
+
+        val toUpload = localEntries.filterNot { it.fullNameWithTimestamp in cloudList }
+        Log.d("WebDAV", "⬆️ 需要上传的文件: ${toUpload.map { it.fullNameWithTimestamp }}")
+
+        toUpload.forEach { entry ->
+            val localFile = File(localDir, entry.fileName)
+            if (localFile.exists()) {
+                val remotePath = "python_files/${entry.fullNameWithTimestamp}"
+                val success = upload(remotePath, localFile)
+                if (success) {
+                    Log.d("WebDAV", "✅ 上传成功: ${entry.fileName} -> $remotePath")
+                } else {
+                    Log.e("WebDAV", "❌ 上传失败: $remotePath")
+                }
+            } else {
+                Log.w("WebDAV", "⚠️ 本地文件不存在: ${entry.fileName}")
+            }
+        }
+
+        Log.d("WebDAV", "✅ 增量同步完成")
+        onFilesDownloaded()  // ← ✅ 这个必须加在最后！
+    }
 
 
-
+    private fun extractTimestamp(name: String): Long {
+        return name.substringAfterLast("_").removeSuffix(".py").toLongOrNull() ?: 0L
+    }
 }

@@ -79,8 +79,10 @@ import android.os.Build
 import java.util.Calendar
 import com.python.service.ForegroundService
 import android.provider.Settings
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.python.data.ScheduledTask
+import com.python.ui.viewmodels.CloudSyncViewModel
 import com.python.ui.viewmodels.HomeViewModel
 import com.python.ui.viewmodels.SettingsViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -120,6 +122,9 @@ fun HomeScreen(
     onSearchClick: () -> Unit = {},
     viewModel: HomeViewModel,
 ) {
+
+
+
     val homeListState = rememberLazyListState()
     val timingListState = rememberLazyListState()
 
@@ -131,7 +136,7 @@ fun HomeScreen(
     val coroutineScope = rememberCoroutineScope()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
-    val fileList by viewModel.fileList.collectAsState()
+//    val fileList by viewModel.fileList.collectAsState()
 
 
     var showDialog by remember { mutableStateOf(false) }
@@ -152,9 +157,7 @@ fun HomeScreen(
 
 
 
-    LaunchedEffect(Unit) {
-        viewModel.loadFiles(context)
-    }
+
 
     Box(
         modifier = Modifier
@@ -267,7 +270,7 @@ fun HomeScreen(
                         0 ->
                             HomeContent(
                             listState = homeListState,
-                            fileList = fileList,
+//                            fileList = fileList,
                             onItemClick = { file ->
                                 navController.navigate("editor/${file.nameWithoutExtension}")
                             },
@@ -331,133 +334,180 @@ fun HomeScreen(
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun HomeContent(
-//    modifier: Modifier = Modifier,
     listState: LazyListState,
-    fileList: List<File>,
+//    fileList: List<File>,
     onItemClick: (File) -> Unit,
     onItemLongClick: (File) -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
+    cloudSyncViewModel: CloudSyncViewModel = hiltViewModel()
 ) {
+
+    val fileList by viewModel.fileList.collectAsState()
+
+    LaunchedEffect(Unit) {
+        viewModel.loadFiles()
+    }
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
+
+//    LaunchedEffect(entries) {
+//        Log.d("WebDAV", "entries changed: $entries")
+//    }
+
+
+
+
+
+    // 用 entries 触发刷新，返回排序后的文件列表
+    val sortedFileList = remember(fileList) {
+        Log.d("WebDAV", "fileList changed: $fileList")
+        Log.d("WebDAV", "sortedFileList recomputed due to entries or fileList change")
+        fileList.sortedByDescending { it.lastModified() }
+    }
+    Log.d("WebDAV", "fileList size: ${fileList.size}")
+    Log.d("WebDAV", "sortedFileList size: ${sortedFileList.size}")
+
+    // 这里用 remember 保持状态，避免重复初始化
     val runningMap = remember { mutableStateMapOf<String, Boolean>() }
     val visibleMap = remember { mutableStateMapOf<String, Boolean>() }
 
-    // 按文件最后修改时间倒序排序
-    val sortedFileList = remember(fileList) {
-        fileList.sortedByDescending { it.lastModified() }
+    // 确保 runningMap 和 visibleMap 包含所有文件路径的默认值
+    LaunchedEffect(sortedFileList) {
+        Log.d("WebDAV", sortedFileList.toString())
+        sortedFileList.forEach { file ->
+            val path = file.absolutePath
+            if (!runningMap.containsKey(path)) runningMap[path] = false
+            if (!visibleMap.containsKey(path)) visibleMap[path] = true
+        }
     }
 
-    sortedFileList.forEach { file ->
-        val path = file.absolutePath
-        runningMap.putIfAbsent(path, false)
-        visibleMap.putIfAbsent(path, true)
-    }
+    var isRefreshing by remember { mutableStateOf(false) }
 
-
-    LazyColumn(
-        state = listState,
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 10.dp, bottom = 30.dp)
+    Log.d("WebDAV", "HomeScreen recomposed")
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = {
+            coroutineScope.launch {
+                isRefreshing = true
+                try {
+                    cloudSyncViewModel.syncNow(context) {
+                        viewModel.loadFiles()
+                        Log.d("WebDAV", "同步完成，准备结束刷新")
+//                        isRefreshing = false  // ✅ 确保结束刷新动画
+                    }
+                } catch (e: Exception) {
+                    Log.e("WebDAV", "❌ 下拉同步异常", e)
+                } finally {
+                    delay(1000)
+                    Log.d("WebDAV", "刷新结束，isRefreshing 设 false")
+                    isRefreshing = false  // ✅ 确保结束刷新动画
+                }
+            }
+        },
+        modifier = Modifier.fillMaxSize()
     ) {
-        items(sortedFileList, key = { it.absolutePath }) { file ->
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(top = 10.dp, bottom = 30.dp)
+        ) {
+            items(sortedFileList, key = { it.absolutePath }) { file ->
 
 
-            var showConfirm by remember { mutableStateOf(false) }
-            val isRunning = runningMap[file.absolutePath] ?: false
-            var showTimePicker by remember { mutableStateOf(false) }
+                var showConfirm by remember { mutableStateOf(false) }
+                val isRunning = runningMap[file.absolutePath] ?: false
+                var showTimePicker by remember { mutableStateOf(false) }
 
-            if (showTimePicker) {
-                TimePickerDialogMaterial3(
-                    onDismiss = { showTimePicker = false },
-                    onConfirm = { hour, minute, repeatDaily ->
-                        showTimePicker = false
+                if (showTimePicker) {
+                    TimePickerDialogMaterial3(
+                        onDismiss = { showTimePicker = false },
+                        onConfirm = { hour, minute, repeatDaily ->
+                            showTimePicker = false
 
-                        // 保存到数据库
-                        val task = ScheduledTask(
-                            filePath = file.absolutePath,
-                            hour = hour,
-                            minute = minute,
-                            repeatDaily = repeatDaily
-                        )
-                        viewModel.insertTask(task)
-                    }
-                )
-            }
-
-
-
-            val rotation by animateFloatAsState(
-                targetValue = if (isRunning) 360f else 0f,
-                animationSpec = tween(durationMillis = 600)
-            )
-
-            val interactionSource = remember { MutableInteractionSource() }
-            val isPressed by interactionSource.collectIsPressedAsState()
-            val scale by animateFloatAsState(targetValue = if (isPressed) 0.95f else 1.0f)
-
-            val visible = visibleMap[file.absolutePath] ?: true
-
-            if (showConfirm) {
-                AlertDialog(
-                    onDismissRequest = { showConfirm = false },
-                    title = { Text("删除文件") },
-                    text = { Text("确认删除 ${file.name} 吗？") },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            // 先播放淡出动画
-                            visibleMap[file.absolutePath] = false
-                            showConfirm = false
-                            // 延迟动画时长后执行删除操作
-                            coroutineScope.launch {
-                                delay(1000) // 动画时长
-                                onItemLongClick(file)
-                            }
-                        }) {
-                            Text("删除")
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showConfirm = false }) {
-                            Text("取消")
-                        }
-                    }
-                )
-            }
-
-            AnimatedVisibility(
-                visible = visible,
-                exit = fadeOut(tween(500)) + scaleOut(tween(500), targetScale = 1.5f),
-                modifier = Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)
-            ) {
-                Column {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .wrapContentHeight()
-                            .graphicsLayer(scaleX = scale, scaleY = scale)
-                            .combinedClickable(
-                                interactionSource = interactionSource,
-                                indication = null,
-                                onClick = { onItemClick(file) },
-                                onLongClick = { showConfirm = true }
+                            // 保存到数据库
+                            val task = ScheduledTask(
+                                filePath = file.absolutePath,
+                                hour = hour,
+                                minute = minute,
+                                repeatDaily = repeatDaily
                             )
-                            .animateContentSize(),
-                        shape = RoundedCornerShape(12.dp),
+                            viewModel.insertTask(task)
+                        }
+                    )
+                }
+
+
+                val rotation by animateFloatAsState(
+                    targetValue = if (isRunning) 360f else 0f,
+                    animationSpec = tween(durationMillis = 600)
+                )
+
+                val interactionSource = remember { MutableInteractionSource() }
+                val isPressed by interactionSource.collectIsPressedAsState()
+                val scale by animateFloatAsState(targetValue = if (isPressed) 0.95f else 1.0f)
+
+                val visible = visibleMap[file.absolutePath] ?: true
+
+                if (showConfirm) {
+                    AlertDialog(
+                        onDismissRequest = { showConfirm = false },
+                        title = { Text("删除文件") },
+                        text = { Text("确认删除 ${file.name} 吗？") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                // 先播放淡出动画
+                                visibleMap[file.absolutePath] = false
+                                showConfirm = false
+                                // 延迟动画时长后执行删除操作
+                                coroutineScope.launch {
+                                    delay(1000) // 动画时长
+                                    onItemLongClick(file)
+                                }
+                            }) {
+                                Text("删除")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showConfirm = false }) {
+                                Text("取消")
+                            }
+                        }
+                    )
+                }
+
+                AnimatedVisibility(
+                    visible = visible,
+                    exit = fadeOut(tween(500)) + scaleOut(tween(500), targetScale = 1.5f),
+                    modifier = Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)
+                ) {
+                    Column {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .wrapContentHeight()
+                                .graphicsLayer(scaleX = scale, scaleY = scale)
+                                .combinedClickable(
+                                    interactionSource = interactionSource,
+                                    indication = null,
+                                    onClick = { onItemClick(file) },
+                                    onLongClick = { showConfirm = true }
+                                )
+                                .animateContentSize(),
+                            shape = RoundedCornerShape(12.dp),
 //                        shape = RectangleShape,
 //                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    ) {
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(start = 12.dp,end = 8.dp,  top = 6.dp, bottom = 6.dp)
+                                    .padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp)
                             ) {
                                 Text(
                                     text = file.name,
@@ -498,15 +548,18 @@ fun HomeContent(
                                 }
                                 IconButton(onClick = {
                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                                        val alarmManager =
+                                            context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
                                         if (!alarmManager.canScheduleExactAlarms()) {
-                                            val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                                            val intent =
+                                                Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
                                             context.startActivity(intent)
                                             return@IconButton
                                         }
                                     }
 
-                                    showTimePicker  = true }
+                                    showTimePicker = true
+                                }
                                 ) {
                                     Icon(
                                         painter = painterResource(id = R.drawable.timing1),
@@ -516,14 +569,14 @@ fun HomeContent(
                                     )
                                 }
                             }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
                     }
-                    Spacer(modifier = Modifier.height(10.dp))
                 }
             }
         }
     }
 }
-
 
 
 //TODO定时页面

@@ -26,11 +26,15 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.python.data.LogManager
 import com.python.service.ForegroundService
+import com.python.ui.viewmodels.HomeViewModel
 import com.python.ui.viewmodels.SettingsViewModel
+import javax.inject.Inject
 
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    @Inject
+    lateinit var startupSync: StartupSync
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // 初始化 Chaquopy
@@ -39,6 +43,17 @@ class MainActivity : ComponentActivity() {
         }
         val intent = Intent(this, ForegroundService::class.java)
         ContextCompat.startForegroundService(this, intent)
+
+        val homeViewModel: HomeViewModel by viewModels()
+
+        // 1️⃣ 先触发同步
+        startupSync.sync(
+            onDownload = {
+                Log.d("MainActivity", "📥 下载触发，刷新文件列表")
+                homeViewModel.loadFiles()
+            }
+        )
+
         enableEdgeToEdge()
         setContent {
             AutoPyTheme {
