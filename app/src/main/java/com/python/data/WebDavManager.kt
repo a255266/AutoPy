@@ -161,24 +161,23 @@ class WebDavManager @Inject constructor(
             val resource = createResource(dir)
             val result = mutableListOf<String>()
 
-            val lock = CompletableDeferred<Unit>()  // 用来等 propfind 完成
-
+            val responses = CompletableDeferred<Unit>()
             resource.propfind(1) { response, _ ->
                 try {
                     val href = response.href ?: return@propfind
-                    val name = href.toString().substringAfterLast("/")
-                    if (name.endsWith(".py")) {
-                        val decodedName = URLDecoder.decode(name, "UTF-8")
-                        result += decodedName
+                    val nameEncoded = href.toString().substringAfterLast("/")
+                    if (nameEncoded.endsWith(".py")) {
+                        val decoded = runCatching { URLDecoder.decode(nameEncoded, "UTF-8") }.getOrElse { nameEncoded }
+                        result += decoded
                     }
                 } catch (e: Exception) {
                     Log.e("WebDAV", "解析 response 失败", e)
                 } finally {
-                    lock.complete(Unit)
+                    responses.complete(Unit)
                 }
             }
 
-            lock.await()
+            responses.await()
             Log.d("WebDAV", "✅ 成功列出云端文件: $result")
             result
         } catch (e: Exception) {
@@ -189,27 +188,34 @@ class WebDavManager @Inject constructor(
 
 
 
+
     suspend fun incrementalSync(
         context: Context,
         dao: SyncFileDao,
         onFilesDownloaded: () -> Unit = {}
-    ){
+    ) {
         Log.d("WebDAV", "🔄 开始增量同步")
 
         val cloudList = listCloudPythonFiles()
         Log.d("WebDAV", "☁️ 云端文件列表: $cloudList")
 
         val localEntries = dao.getAll()
-        val localFullNames = localEntries.map { it.fullNameWithTimestamp }
-        Log.d("WebDAV", "💾 本地数据库记录: $localFullNames")
+        val localMap = localEntries.associateBy { it.fileName } // fileName → entry
+        val localDir = File(context.filesDir, "python_files").apply { mkdirs() }
 
-        val localDir = File(context.filesDir, "python_files")
-        if (!localDir.exists()) {
-            localDir.mkdirs()
-            Log.d("WebDAV", "📁 创建本地目录: ${localDir.absolutePath}")
+        // 云端 fullName → 解出的 fileName 与 timestamp
+        val cloudInfo = cloudList.mapNotNull {
+            val name = it.substringBeforeLast("_") + ".py"
+            val ts = extractTimestamp(it)
+            if (name.isNotBlank()) name to (it to ts) else null
+        }.toMap() // fileName → Pair(fullName, timestamp)
+
+        val toDownload = cloudInfo.mapNotNull { (fileName, cloudPair) ->
+            val (fullName, cloudTs) = cloudPair
+            val localTs = localMap[fileName]?.timestamp ?: 0L
+            if (cloudTs > localTs) fullName else null
         }
 
-        val toDownload = cloudList.filterNot { it in localFullNames }
         Log.d("WebDAV", "⬇️ 需要下载的文件: $toDownload")
 
         toDownload.forEach { fullName ->
@@ -226,7 +232,11 @@ class WebDavManager @Inject constructor(
             }
         }
 
-        val toUpload = localEntries.filterNot { it.fullNameWithTimestamp in cloudList }
+        val toUpload = localEntries.mapNotNull { entry ->
+            val cloudTs = cloudInfo[entry.fileName]?.second ?: 0L
+            if (entry.timestamp > cloudTs) entry else null
+        }
+
         Log.d("WebDAV", "⬆️ 需要上传的文件: ${toUpload.map { it.fullNameWithTimestamp }}")
 
         toUpload.forEach { entry ->
@@ -245,8 +255,9 @@ class WebDavManager @Inject constructor(
         }
 
         Log.d("WebDAV", "✅ 增量同步完成")
-        onFilesDownloaded()  // ← ✅ 这个必须加在最后！
+        onFilesDownloaded()
     }
+
 
 
     private fun extractTimestamp(name: String): Long {
